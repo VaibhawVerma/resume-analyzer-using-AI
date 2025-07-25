@@ -11,8 +11,8 @@ declare global {
             };
             fs: {
                 write: (
-                    path: string,
-                    data: string | File | Blob
+                  path: string,
+                  data: string | File | Blob
                 ) => Promise<File | undefined>;
                 read: (path: string) => Promise<Blob>;
                 upload: (file: File[] | Blob[]) => Promise<FSItem>;
@@ -21,20 +21,18 @@ declare global {
             };
             ai: {
                 chat: (
-                    prompt: string | ChatMessage[],
-                    imageURL?: string | PuterChatOptions,
-                    testMode?: boolean,
-                    options?: PuterChatOptions
+                  prompt: string | ChatMessage[],
+                  imageURL?: string | PuterChatOptions,
+                  testMode?: boolean,
+                  options?: PuterChatOptions
                 ) => Promise<Object>;
-                img2txt: (
-                    image: string | File | Blob,
-                    testMode?: boolean
-                ) => Promise<string>;
+                img2txt: (image: string | File | Blob, testMode?: boolean) => Promise<string>;
             };
             kv: {
                 get: (key: string) => Promise<string | null>;
                 set: (key: string, value: string) => Promise<boolean>;
-                delete: (key: string) => Promise<boolean>;
+                delete?: (key: string) => Promise<boolean>; // optional: might be undefined
+                del?: (key: string) => Promise<boolean>;    // optional: alternative name
                 list: (pattern: string, returnValues?: boolean) => Promise<string[]>;
                 flush: () => Promise<boolean>;
             };
@@ -46,6 +44,7 @@ interface PuterStore {
     isLoading: boolean;
     error: string | null;
     puterReady: boolean;
+
     auth: {
         user: PuterUser | null;
         isAuthenticated: boolean;
@@ -55,40 +54,32 @@ interface PuterStore {
         checkAuthStatus: () => Promise<boolean>;
         getUser: () => PuterUser | null;
     };
+
     fs: {
-        write: (
-            path: string,
-            data: string | File | Blob
-        ) => Promise<File | undefined>;
+        write: (path: string, data: string | File | Blob) => Promise<File | undefined | void>;
         read: (path: string) => Promise<Blob | undefined>;
-        upload: (file: File[] | Blob[]) => Promise<FSItem | undefined>;
+        upload: (files: File[] | Blob[]) => Promise<FSItem | undefined>;
         delete: (path: string) => Promise<void>;
         readDir: (path: string) => Promise<FSItem[] | undefined>;
     };
+
     ai: {
         chat: (
-            prompt: string | ChatMessage[],
-            imageURL?: string | PuterChatOptions,
-            testMode?: boolean,
-            options?: PuterChatOptions
+          prompt: string | ChatMessage[],
+          imageURL?: string | PuterChatOptions,
+          testMode?: boolean,
+          options?: PuterChatOptions
         ) => Promise<AIResponse | undefined>;
-        feedback: (
-            path: string,
-            message: string
-        ) => Promise<AIResponse | undefined>;
-        img2txt: (
-            image: string | File | Blob,
-            testMode?: boolean
-        ) => Promise<string | undefined>;
+        feedback: (path: string, message: string) => Promise<AIResponse | undefined>;
+        img2txt: (image: string | File | Blob, testMode?: boolean) => Promise<string | undefined>;
     };
+
     kv: {
         get: (key: string) => Promise<string | null | undefined>;
         set: (key: string, value: string) => Promise<boolean | undefined>;
         delete: (key: string) => Promise<boolean | undefined>;
-        list: (
-            pattern: string,
-            returnValues?: boolean
-        ) => Promise<string[] | KVItem[] | undefined>;
+        del: (key: string) => Promise<boolean | undefined>;
+        list: (pattern: string, returnValues?: boolean) => Promise<string[] | KVItem[] | undefined>;
         flush: () => Promise<boolean | undefined>;
     };
 
@@ -97,7 +88,7 @@ interface PuterStore {
 }
 
 const getPuter = (): typeof window.puter | null =>
-    typeof window !== "undefined" && window.puter ? window.puter : null;
+  typeof window !== "undefined" && window.puter ? window.puter : null;
 
 export const usePuterStore = create<PuterStore>((set, get) => {
     const setError = (msg: string) => {
@@ -116,15 +107,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         });
     };
 
+    // Auth status check
     const checkAuthStatus = async (): Promise<boolean> => {
         const puter = getPuter();
         if (!puter) {
             setError("Puter.js not available");
             return false;
         }
-
         set({ isLoading: true, error: null });
-
         try {
             const isSignedIn = await puter.auth.isSignedIn();
             if (isSignedIn) {
@@ -158,22 +148,20 @@ export const usePuterStore = create<PuterStore>((set, get) => {
                 return false;
             }
         } catch (err) {
-            const msg =
-                err instanceof Error ? err.message : "Failed to check auth status";
+            const msg = err instanceof Error ? err.message : "Failed to check auth status";
             setError(msg);
             return false;
         }
     };
 
+    // Sign in method
     const signIn = async (): Promise<void> => {
         const puter = getPuter();
         if (!puter) {
             setError("Puter.js not available");
             return;
         }
-
         set({ isLoading: true, error: null });
-
         try {
             await puter.auth.signIn();
             await checkAuthStatus();
@@ -183,15 +171,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         }
     };
 
+    // Sign out method
     const signOut = async (): Promise<void> => {
         const puter = getPuter();
         if (!puter) {
             setError("Puter.js not available");
             return;
         }
-
         set({ isLoading: true, error: null });
-
         try {
             await puter.auth.signOut();
             set({
@@ -212,15 +199,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         }
     };
 
+    // Refresh current user
     const refreshUser = async (): Promise<void> => {
         const puter = getPuter();
         if (!puter) {
             setError("Puter.js not available");
             return;
         }
-
         set({ isLoading: true, error: null });
-
         try {
             const user = await puter.auth.getUser();
             set({
@@ -241,30 +227,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         }
     };
 
-    const init = (): void => {
-        const puter = getPuter();
-        if (puter) {
-            set({ puterReady: true });
-            checkAuthStatus();
-            return;
-        }
-
-        const interval = setInterval(() => {
-            if (getPuter()) {
-                clearInterval(interval);
-                set({ puterReady: true });
-                checkAuthStatus();
-            }
-        }, 100);
-
-        setTimeout(() => {
-            clearInterval(interval);
-            if (!getPuter()) {
-                setError("Puter.js failed to load within 10 seconds");
-            }
-        }, 10000);
-    };
-
+    // FS methods wrappers
     const write = async (path: string, data: string | File | Blob) => {
         const puter = getPuter();
         if (!puter) {
@@ -310,20 +273,20 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         return puter.fs.delete(path);
     };
 
+    // AI methods wrappers
     const chat = async (
-        prompt: string | ChatMessage[],
-        imageURL?: string | PuterChatOptions,
-        testMode?: boolean,
-        options?: PuterChatOptions
+      prompt: string | ChatMessage[],
+      imageURL?: string | PuterChatOptions,
+      testMode?: boolean,
+      options?: PuterChatOptions
     ) => {
         const puter = getPuter();
         if (!puter) {
             setError("Puter.js not available");
             return;
         }
-        // return puter.ai.chat(prompt, imageURL, testMode, options);
         return puter.ai.chat(prompt, imageURL, testMode, options) as Promise<
-            AIResponse | undefined
+          AIResponse | undefined
         >;
     };
 
@@ -335,22 +298,22 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         }
 
         return puter.ai.chat(
-            [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "file",
-                            puter_path: path,
-                        },
-                        {
-                            type: "text",
-                            text: message,
-                        },
-                    ],
-                },
-            ],
-            { model: "claude-3-7-sonnet" }
+          [
+              {
+                  role: "user",
+                  content: [
+                      {
+                          type: "file",
+                          puter_path: path,
+                      },
+                      {
+                          type: "text",
+                          text: message,
+                      },
+                  ],
+              },
+          ],
+          { model: "claude-3-7-sonnet" }
         ) as Promise<AIResponse | undefined>;
     };
 
@@ -363,6 +326,7 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         return puter.ai.img2txt(image, testMode);
     };
 
+    // KV methods wrappers, with safe delete support for del or delete
     const getKV = async (key: string) => {
         const puter = getPuter();
         if (!puter) {
@@ -387,7 +351,14 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             setError("Puter.js not available");
             return;
         }
-        return puter.kv.delete(key);
+        if (typeof puter.kv.del === "function") {
+            return puter.kv.del(key);
+        } else if (typeof puter.kv.delete === "function") {
+            return puter.kv.delete(key);
+        } else {
+            setError("puter.kv.del and .delete methods not available");
+            return;
+        }
     };
 
     const listKV = async (pattern: string, returnValues?: boolean) => {
@@ -409,6 +380,31 @@ export const usePuterStore = create<PuterStore>((set, get) => {
             return;
         }
         return puter.kv.flush();
+    };
+
+    // Initialize and check for puter availability
+    const init = (): void => {
+        const puter = getPuter();
+        if (puter) {
+            set({ puterReady: true });
+            checkAuthStatus();
+            return;
+        }
+
+        const interval = setInterval(() => {
+            if (getPuter()) {
+                clearInterval(interval);
+                set({ puterReady: true });
+                checkAuthStatus();
+            }
+        }, 100);
+
+        setTimeout(() => {
+            clearInterval(interval);
+            if (!getPuter()) {
+                setError("Puter.js failed to load within 10 seconds");
+            }
+        }, 10000);
     };
 
     return {
@@ -433,21 +429,20 @@ export const usePuterStore = create<PuterStore>((set, get) => {
         },
         ai: {
             chat: (
-                prompt: string | ChatMessage[],
-                imageURL?: string | PuterChatOptions,
-                testMode?: boolean,
-                options?: PuterChatOptions
+              prompt: string | ChatMessage[],
+              imageURL?: string | PuterChatOptions,
+              testMode?: boolean,
+              options?: PuterChatOptions
             ) => chat(prompt, imageURL, testMode, options),
             feedback: (path: string, message: string) => feedback(path, message),
-            img2txt: (image: string | File | Blob, testMode?: boolean) =>
-                img2txt(image, testMode),
+            img2txt: (image: string | File | Blob, testMode?: boolean) => img2txt(image, testMode),
         },
         kv: {
             get: (key: string) => getKV(key),
             set: (key: string, value: string) => setKV(key, value),
-            delete: (key: string) => deleteKV(key),
-            list: (pattern: string, returnValues?: boolean) =>
-                listKV(pattern, returnValues),
+            delete: (key: string) => deleteKV(key), // expose as delete alias
+            del: (key: string) => deleteKV(key),    // expose as del alias
+            list: (pattern: string, returnValues?: boolean) => listKV(pattern, returnValues),
             flush: () => flushKV(),
         },
         init,
